@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { access } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { readMarkdownFile } from "@red-cup-engineering/markdown-engineering-services-section/read-markdown-file";
 import { writeMarkdownFile } from "@red-cup-engineering/markdown-engineering-services-section/write-markdown-file";
 import { readFileText } from "@red-cup-engineering/computer-file-engineering-services-section/read-file";
@@ -14,6 +14,30 @@ import { writeEnterpriseBrand } from "@coesite-operations/enterprise-branding-se
 import { sectionCarriesBrand, sectionCustody } from "@coesite-operations/enterprise-branding-services-section/src";
 
 const SERVICES_TREE_PREFIX = "lib/emsenn/services/561-group/services/";
+const ENGINEERING_TREE_PREFIX = `${SERVICES_TREE_PREFIX}engineering-services-section/`;
+const SECTION_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*-(?:services-section|service)$/u;
+
+/**
+ * The Group's naming law for a new section, read from its path alone: the directory is the name, it sits
+ * in its parent's services/, it is kebab-case ending in -services-section (a section) or -service (a leaf
+ * service), and a section founded anywhere under engineering-services-section names its engineering
+ * ("computer-engineering-services-section", never "computer-services-section").
+ * @param {string} path The requested repo-relative section path.
+ * @param {string} name The requested section name.
+ * @returns {string[]} One sentence per rule the request breaks; empty when the name conforms.
+ */
+export function sectionNameObstructions(path, name) {
+  const trimmed = path.replace(/\/+$/u, "");
+  const directory = posix.basename(trimmed);
+  const obstructions = [];
+  if (directory !== name) obstructions.push(`the directory "${directory}" is not the section's name "${name}"`);
+  if (posix.basename(posix.dirname(trimmed)) !== "services") obstructions.push(`"${directory}" is not founded in its parent's services/ directory`);
+  if (!SECTION_NAME.test(directory)) obstructions.push(`"${directory}" is not kebab-case ending in -services-section or -service`);
+  if (trimmed.startsWith(ENGINEERING_TREE_PREFIX) && directory.endsWith("-services-section") && !directory.endsWith("-engineering-services-section")) {
+    obstructions.push(`a section under engineering-services-section is named "<subject>-engineering-services-section", not "${directory}"`);
+  }
+  return obstructions;
+}
 
 const operationDefinition = {
   name: "foundServicesSection",
@@ -42,6 +66,12 @@ const operationDefinition = {
         required: ["refused"],
         additionalProperties: false,
         properties: { refused: { enum: ["PATH_OUTSIDE_SERVICES_TREE", "REPOSITORY_ROOT_NOT_FOUND"] }, cwd: { type: "string" } },
+      },
+      {
+        type: "object",
+        required: ["refused", "obstructions"],
+        additionalProperties: false,
+        properties: { refused: { const: "NAME_NOT_CONFORMANT" }, obstructions: { type: "array", items: { type: "string" } } },
       },
       {
         type: "object",
@@ -86,7 +116,7 @@ function defaultReadmeText(packageName, packageDescription) {
 /**
  * Founds one new services-section directory in ServicesSectionForm shape — a README.md and package.json — skipping either that already exists rather than overwriting it, optionally appending one sentence to the parent section's README, then folds the resulting directory entries through fold-directory-entries-into-services-section-form-service.
  * @param {{path: string, name: string, custody: string, packageName: string, packageDescription: string, brand?: string, keywords?: string[], parentReadmeSentence?: string, readme?: string, root?: string}} request A record naming the new section's repo-relative path (must be beneath lib/emsenn/services/561-group/services/), its display name, custody ("science"|"engineering"|"operations"|"561-group"|"public"), its package name and description, an optional brand name (written as an enterprise brand service record through enterprise-branding-services-section's write script — never into the package name, directory name, or README title — and refused when the section is not public custody or one of the five houses), optional extra keywords appended after custody, an optional sentence to append to the parent section's README when not already present, an optional full README text (a one-paragraph README is generated from packageName/packageDescription when omitted), and an optional root (an absolute repository root to resolve path against; when omitted, the repository root is found by walking up from process.cwd() to the nearest ancestor containing lib/emsenn/services/561-group/services, so the result never depends on which directory the caller happens to be in).
- * @returns {Promise<object>} The ServicesSectionForm record folded from the section's entries, plus `created` and `skipped` relative-path arrays, and `brand` (the write-enterprise-brand.mjs result) when request.brand was supplied; or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}` when path is not beneath the services tree, `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}` when root is omitted and no ancestor of process.cwd() contains the services tree, or `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}` when request.brand was supplied for a section that is not public custody or one of the five houses.
+ * @returns {Promise<object>} The ServicesSectionForm record folded from the section's entries, plus `created` and `skipped` relative-path arrays, and `brand` (the write-enterprise-brand.mjs result) when request.brand was supplied; or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}` when path is not beneath the services tree, `{refused: "NAME_NOT_CONFORMANT", obstructions}` when the name breaks the Group's naming law (see sectionNameObstructions), before anything is written, `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}` when root is omitted and no ancestor of process.cwd() contains the services tree, or `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}` when request.brand was supplied for a section that is not public custody or one of the five houses.
  * @throws {TypeError} When path, name, custody, packageName, or packageDescription is missing or not a string.
  */
 export async function foundServicesSection(request) {
@@ -99,6 +129,9 @@ export async function foundServicesSection(request) {
   if (!request.path.startsWith(SERVICES_TREE_PREFIX)) {
     return { refused: "PATH_OUTSIDE_SERVICES_TREE" };
   }
+
+  const obstructions = sectionNameObstructions(request.path, request.name);
+  if (obstructions.length > 0) return { refused: "NAME_NOT_CONFORMANT", obstructions };
 
   const cwd = process.cwd();
   const repositoryRoot = typeof request.root === "string" && request.root.length > 0
