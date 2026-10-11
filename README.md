@@ -87,8 +87,16 @@ longer a separate dependency).
 - Returns (`Promise<object>`): the folded ServicesSectionForm record plus
   `created` and `skipped` relative-path arrays, and `brand` when supplied;
   or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}`,
+  `{refused: "NAME_NOT_CONFORMANT", obstructions}`,
   `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}`, or
   `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}`.
+- Naming law (`sectionNameObstructions(path, name)`), checked before anything
+  is written: the directory is the name; it sits in its parent's `services/`;
+  it is kebab-case ending in `-services-section` (a section) or `-service` (a
+  leaf service); and a section anywhere under `engineering-services-section/`
+  names its engineering — `computer-engineering-services-section`, never
+  `computer-services-section`. A new area is founded through this verb, not
+  with `mkdir`.
 - Throws `TypeError` when path, name, custody, packageName, or
   packageDescription is missing or not a string.
 
