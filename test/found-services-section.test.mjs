@@ -177,6 +177,23 @@ test("an old untyped name or opaque custody object cannot found a section or fab
   });
 });
 
+test("legacy Brand conflicts are rejected before any section sibling is fabricated", async () => {
+  await withTempRoot(async (root) => {
+    const path = "lib/emsenn/services/561-group/services/public-services-section/services/rain-barrel-services-section";
+    const legacyDir = join(root, path, "data/records/service-records");
+    await mkdir(legacyDir, { recursive: true });
+    await writeFile(join(legacyDir, "rain-barrel-services-section-enterprise-brand-service-record.json"),
+      JSON.stringify({ name: "Rain Barrel", custody: "public" }));
+    const result = await foundServicesSection({ path, name: "rain-barrel-services-section",
+      custody: "public", packageName: "@causeway-services/rain-barrel",
+      packageDescription: "Rain barrels.", brand: authoredBrand, root });
+    assert.equal(result.refusal, "LEGACY_BRAND_RECORD_PRESENT");
+    assert.equal(existsSync(join(root, path, "README.md")), false);
+    assert.equal(existsSync(join(root, path, "package.json")), false);
+    assert.equal(existsSync(join(root, path, "data/records/brand-records")), false);
+  });
+});
+
 test("appends a parentReadmeSentence once and skips it as already-present on a repeat call", async () => {
   await withTempRoot(async (root) => {
     const parentDir = "lib/emsenn/services/561-group/services/561-group-services-section";
