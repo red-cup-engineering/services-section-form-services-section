@@ -10,7 +10,7 @@ import { runJavascriptNodeOperation } from "@red-cup-engineering/javascript-node
 import { foldDirectoryEntriesIntoServicesSectionForm } from "./fold-directory-entries-into-services-section-form.mjs";
 import { checkServicesSectionFormConformance } from "./check-services-section-form-conformance.mjs";
 import { findServicesSectionRepositoryRoot, readServicesSectionLaw } from "./read-services-section-law.mjs";
-import { writeEnterpriseBrand, qualifyEnterpriseBrand } from "@coesite-operations/enterprise-branding-services-section/write-enterprise-brand";
+import { writeEnterpriseBrand, planEnterpriseBrandWrite } from "@coesite-operations/enterprise-branding-services-section/write-enterprise-brand";
 
 const SERVICES_TREE_PREFIX = "lib/emsenn/services/561-group/services/";
 const ENGINEERING_TREE_PREFIX = `${SERVICES_TREE_PREFIX}engineering-services-section/`;
@@ -145,7 +145,7 @@ export async function foundServicesSection(request) {
   // Qualify the caller's authored Brand IRI and vocabulary before writing
   // section files. A name string cannot supply public identity or authority.
   if (request.brand !== undefined) {
-    const qualification = await qualifyEnterpriseBrand({ sectionPath: request.path, brand: request.brand });
+    const qualification = await planEnterpriseBrandWrite({ sectionPath: request.path, brand: request.brand, root: repositoryRoot });
     if (qualification.refusal) return qualification;
   }
 
