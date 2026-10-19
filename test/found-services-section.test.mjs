@@ -7,6 +7,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { foundServicesSection, sectionNameObstructions } from "../scripts/found-services-section.mjs";
+import { readEnterpriseBrand } from "@coesite-operations/enterprise-branding-services-section/read-enterprise-brand";
+
+const authoredBrand = Object.freeze({ "@context": "https://schema.org", "@id": "https://rain-barrel.example/#brand", "@type": "Brand", name: "Rain Barrel", identifier: "rain-barrel" });
 
 const originalCwd = process.cwd();
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -122,7 +125,7 @@ test("uses extra keywords in package.json, and a supplied readme verbatim", asyn
   });
 });
 
-test("writes an enterprise brand record for a public-custody section", async () => {
+test("founds a section and writes its caller-qualified schema.org Brand source", async () => {
   await withTempRoot(async (root) => {
     const path = "lib/emsenn/services/561-group/services/public-services-section/services/rain-barrel-services-section";
     const result = await foundServicesSection({
@@ -131,12 +134,14 @@ test("writes an enterprise brand record for a public-custody section", async () 
       custody: "public",
       packageName: "@causeway-services/rain-barrel",
       packageDescription: "A public rain-barrel property.",
-      brand: "Rain Barrel",
+      brand: authoredBrand,
       root,
     });
     assert.equal(result.brand.type, "EnterpriseBrandWritten");
-    const brandRecord = JSON.parse(await readFile(join(path, "data", "records", "service-records", "rain-barrel-services-section-enterprise-brand-service-record.json"), "utf8"));
-    assert.deepEqual(brandRecord, { name: "Rain Barrel", custody: "public" });
+    assert.equal(result.brand.identity, "https://rain-barrel.example/#brand");
+    const brandRecord = JSON.parse(await readFile(join(path, "data", "records", "brand-records", "rain-barrel.jsonld"), "utf8"));
+    assert.deepEqual(brandRecord, authoredBrand);
+    assert.deepEqual(await readEnterpriseBrand({ sectionPath: path, root }), authoredBrand);
   });
 });
 
@@ -149,10 +154,26 @@ test("refuses a brand for a non-public non-house section without founding it", a
       custody: "engineering",
       packageName: "@red-cup-engineering/rain-barrel-engineering-services-section",
       packageDescription: "An engineering leaf section.",
-      brand: "Rain Barrel",
+      brand: authoredBrand,
       root,
     });
     assert.deepEqual(result, { refusal: "SECTION_CARRIES_NO_BRAND", sectionPath: path, custody: "engineering" });
+    assert.equal(existsSync(join(root, path, "package.json")), false);
+  });
+});
+
+test("an old untyped name or opaque custody object cannot found a section or fabricate a Brand IRI", async () => {
+  await withTempRoot(async (root) => {
+    const path = "lib/emsenn/services/561-group/services/public-services-section/services/rain-barrel-services-section";
+    const request = { path, name: "rain-barrel-services-section", custody: "public",
+      packageName: "@causeway-services/rain-barrel", packageDescription: "Rain barrels.", root };
+    await assert.rejects(() => foundServicesSection({ ...request, brand: "Rain Barrel" }), /brand is required/);
+    const legacy = await foundServicesSection({ ...request, brand: { name: "Rain Barrel", custody: "public" } });
+    assert.equal(legacy.refusal, "INVALID_BRAND_RECORD");
+    const forged = await foundServicesSection({ ...request, brand: { ...authoredBrand, legalName: "Invented Corporation" } });
+    assert.equal(forged.refusal, "INVALID_BRAND_RECORD");
+    assert.equal(existsSync(join(root, path, "README.md")), false);
+    assert.equal(existsSync(join(root, path, "data/records/brand-records")), false);
   });
 });
 
