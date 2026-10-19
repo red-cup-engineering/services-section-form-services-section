@@ -78,10 +78,10 @@ longer a separate dependency).
   repo-relative path (must be beneath
   `lib/emsenn/services/561-group/services/`), its display name, custody
   (`"science"|"engineering"|"operations"|"561-group"|"public"`), its package
-  name and description, an optional brand name (written as an enterprise
-  brand service record — never into the package name, directory name, or
-  README title — and refused when the section is not public custody or one
-  of the five houses), optional extra keywords, an optional sentence to
+  name and description, an optional caller-authored W3C JSON-LD 1.1 schema.org Brand
+  object (actual @id, @type, name and identifier, not a name string), written
+  by the existing Coesite source owner as a brand-records/*.jsonld identity;
+  it confers no legal, office, authorial or market authority, optional extra keywords, an optional sentence to
   append to the parent section's README, an optional full README text, and
   an optional root.
 - Returns (`Promise<object>`): the folded ServicesSectionForm record plus
@@ -126,6 +126,37 @@ of its own.
 
 Command: `check-services-section-form-conformance` reads one JSON value per
 input line and writes one JSON value per output line.
+
+### Qualified Brand source consumer
+
+The section founder prequalifies an optional Brand through the original
+`@coesite-operations/enterprise-branding-services-section` source validator
+**before creating** a section's README or package.json. Source authors must
+supply a full schema.org `Brand` resource, not an opaque `brand: "Name"`:
+
+```json
+{
+  "@context": "https://schema.org",
+  "@id": "https://561.group/#brand",
+  "@type": "Brand",
+  "name": "561 Group",
+  "identifier": "561-group"
+}
+```
+
+After section conformance, the original Coesite writer writes a
+`data/records/brand-records/<identifier>.jsonld` typed identity within that
+section's actual source custody, where its original reader can read it.
+An existing legacy service record, competing Brand, forged legalName,
+unqualified IRI or private ineligible section is refused, not promoted by
+a fabricated registry or invented URL. For source-owned house repos the
+corresponding scoped root path is `data/records/brand-records/<identifier>.jsonld`.
+
+This source-bound writer is upstream of the Group's
+[enterprise Brand migration #203](https://github.com/561-group/561-group-services-section/pull/203)
+and the independent [Causeway Shop receiver #3](https://github.com/causeway-services/shop.561.group/pull/3).
+Successful founding is not an installed Coesite release, authorized
+seller, generated Shop catalog, public Worker deployment or buyer receipt.
 
 ## Law binding
 
