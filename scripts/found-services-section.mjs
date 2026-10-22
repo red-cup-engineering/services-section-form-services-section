@@ -10,8 +10,7 @@ import { runJavascriptNodeOperation } from "@red-cup-engineering/javascript-node
 import { foldDirectoryEntriesIntoServicesSectionForm } from "./fold-directory-entries-into-services-section-form.mjs";
 import { checkServicesSectionFormConformance } from "./check-services-section-form-conformance.mjs";
 import { findServicesSectionRepositoryRoot, readServicesSectionLaw } from "./read-services-section-law.mjs";
-import { writeEnterpriseBrand } from "@coesite-operations/enterprise-branding-services-section/write-enterprise-brand";
-import { sectionCarriesBrand, sectionCustody } from "@coesite-operations/enterprise-branding-services-section/src";
+import { writeEnterpriseBrand, planEnterpriseBrandWrite } from "@coesite-operations/enterprise-branding-services-section/write-enterprise-brand";
 
 const SERVICES_TREE_PREFIX = "lib/emsenn/services/561-group/services/";
 const ENGINEERING_TREE_PREFIX = `${SERVICES_TREE_PREFIX}engineering-services-section/`;
@@ -51,7 +50,7 @@ const operationDefinition = {
       custody: { type: "string", minLength: 1 },
       packageName: { type: "string", minLength: 1 },
       packageDescription: { type: "string", minLength: 1 },
-      brand: { type: "string" },
+      brand: { type: "object", description: "Caller-authored schema.org Brand JSON-LD node; qualified by Coesite." },
       keywords: { type: "array", items: { type: "string" } },
       parentReadmeSentence: { type: "string" },
       readme: { type: "string" },
@@ -75,12 +74,14 @@ const operationDefinition = {
       },
       {
         type: "object",
-        required: ["refusal", "sectionPath", "custody"],
-        additionalProperties: false,
+        required: ["refusal", "sectionPath"],
         properties: {
-          refusal: { const: "SECTION_CARRIES_NO_BRAND" },
+          refusal: { enum: [
+            "SECTION_CARRIES_NO_BRAND", "INVALID_BRAND_RECORD", "INVALID_BRAND_IRI",
+            "LEGACY_BRAND_RECORD_PRESENT", "BRAND_RECORD_CONFLICT",
+            "BRAND_IDENTITY_CONFLICT", "BRAND_EXISTING_INVALID",
+          ] },
           sectionPath: { type: "string" },
-          custody: { type: "string" },
         },
       },
     ],
@@ -115,8 +116,8 @@ function defaultReadmeText(packageName, packageDescription) {
 
 /**
  * Founds one new services-section directory in ServicesSectionForm shape — a README.md and package.json — skipping either that already exists rather than overwriting it, optionally appending one sentence to the parent section's README, then folds the resulting directory entries through fold-directory-entries-into-services-section-form-service.
- * @param {{path: string, name: string, custody: string, packageName: string, packageDescription: string, brand?: string, keywords?: string[], parentReadmeSentence?: string, readme?: string, root?: string}} request A record naming the new section's repo-relative path (must be beneath lib/emsenn/services/561-group/services/), its display name, custody ("science"|"engineering"|"operations"|"561-group"|"public"), its package name and description, an optional brand name (written as an enterprise brand service record through enterprise-branding-services-section's write script — never into the package name, directory name, or README title — and refused when the section is not public custody or one of the five houses), optional extra keywords appended after custody, an optional sentence to append to the parent section's README when not already present, an optional full README text (a one-paragraph README is generated from packageName/packageDescription when omitted), and an optional root (an absolute repository root to resolve path against; when omitted, the repository root is found by walking up from process.cwd() to the nearest ancestor containing lib/emsenn/services/561-group/services, so the result never depends on which directory the caller happens to be in).
- * @returns {Promise<object>} The ServicesSectionForm record folded from the section's entries, plus `created` and `skipped` relative-path arrays, and `brand` (the write-enterprise-brand.mjs result) when request.brand was supplied; or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}` when path is not beneath the services tree, `{refused: "NAME_NOT_CONFORMANT", obstructions}` when the name breaks the Group's naming law (see sectionNameObstructions), before anything is written, `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}` when root is omitted and no ancestor of process.cwd() contains the services tree, or `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}` when request.brand was supplied for a section that is not public custody or one of the five houses.
+ * @param {{path: string, name: string, custody: string, packageName: string, packageDescription: string, brand?: object, keywords?: string[], parentReadmeSentence?: string, readme?: string, root?: string}} request A record naming the new section's repo-relative path (must be beneath lib/emsenn/services/561-group/services/), its display name, custody ("science"|"engineering"|"operations"|"561-group"|"public"), its package name and description, a caller-authored schema.org Brand JSON-LD object with its own stable @id and identifier; written through the original Coesite brand-records identity source without inferring legal rights, URLs or custody from names, optional extra keywords appended after custody, an optional sentence to append to the parent section's README when not already present, an optional full README text (a one-paragraph README is generated from packageName/packageDescription when omitted), and an optional root (an absolute repository root to resolve path against; when omitted, the repository root is found by walking up from process.cwd() to the nearest ancestor containing lib/emsenn/services/561-group/services, so the result never depends on which directory the caller happens to be in).
+ * @returns {Promise<object>} The ServicesSectionForm record folded from the section's entries, plus `created` and `skipped` relative-path arrays, and `brand` (the original typed Brand writer result) when request.brand was supplied; or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}` when path is not beneath the services tree, `{refused: "NAME_NOT_CONFORMANT", obstructions}` when the name breaks the Group's naming law (see sectionNameObstructions), before anything is written, `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}` when root is omitted and no ancestor of process.cwd() contains the services tree, or `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}` when request.brand was supplied for a section that is not public custody or one of the five houses.
  * @throws {TypeError} When path, name, custody, packageName, or packageDescription is missing or not a string.
  */
 export async function foundServicesSection(request) {
@@ -141,8 +142,11 @@ export async function foundServicesSection(request) {
     return { refused: "REPOSITORY_ROOT_NOT_FOUND", cwd };
   }
 
-  if (typeof request.brand === "string" && request.brand.length > 0 && !sectionCarriesBrand(request.path)) {
-    return { refusal: "SECTION_CARRIES_NO_BRAND", sectionPath: request.path, custody: sectionCustody(request.path) };
+  // Qualify the caller's authored Brand IRI and vocabulary before writing
+  // section files. A name string cannot supply public identity or authority.
+  if (request.brand !== undefined) {
+    const qualification = await planEnterpriseBrandWrite({ sectionPath: request.path, brand: request.brand, root: repositoryRoot });
+    if (qualification.refusal) return qualification;
   }
 
   const { schema, contentTaxonomy } = await readServicesSectionLaw(repositoryRoot);
@@ -206,9 +210,9 @@ export async function foundServicesSection(request) {
   const receiving = checkServicesSectionFormConformance(form, schema);
   if (!receiving.conformant) throw new Error(JSON.stringify(receiving.obstructions));
 
-  const brand = typeof request.brand === "string" && request.brand.length > 0
-    ? await writeEnterpriseBrand({ sectionPath: request.path, brand: { name: request.brand, custody: request.custody }, root: repositoryRoot })
-    : undefined;
+  const brand = request.brand === undefined ? undefined
+    : await writeEnterpriseBrand({ sectionPath: request.path, brand: request.brand, root: repositoryRoot });
+  if (brand?.refusal) return brand;
 
   return { ...form, created, skipped, ...(brand === undefined ? {} : { brand }) };
 }
