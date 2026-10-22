@@ -54,13 +54,13 @@ test("the command founds a section and emits the same complete result carrier", 
   await installSectionLaw(root);
   try {
     await mkdir(join(root, "lib/emsenn/services/561-group/services"), { recursive: true });
-    const path = "lib/emsenn/services/561-group/services/widget-services-section";
+    const path = "lib/emsenn/services/561-group/services/engineering-services-section/services/widget-engineering-services-section";
     const command = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/found-services-section.mjs", import.meta.url))], {
       input: `${JSON.stringify({
         path,
-        name: "widget-services-section",
+        name: "widget-engineering-services-section",
         custody: "engineering",
-        packageName: "@red-cup-engineering/widget-services-section",
+        packageName: "@red-cup-engineering/widget-engineering-services-section",
         packageDescription: "A widget section founded through the CLI.",
         root,
       })}\n`,

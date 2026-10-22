@@ -9,19 +9,19 @@ import { walkPosixPaths } from "@red-cup-engineering/computer-filepath-engineeri
 import { runJavascriptNodeOperation } from "@red-cup-engineering/javascript-node-services-section/operation";
 import { foldDirectoryEntriesIntoServicesSectionForm } from "./fold-directory-entries-into-services-section-form.mjs";
 import { checkServicesSectionFormConformance } from "./check-services-section-form-conformance.mjs";
-import { findServicesSectionRepositoryRoot, readServicesSectionLaw } from "./read-services-section-law.mjs";
+import { findServicesSectionRepositoryRoot, readServicesSectionLaw, readSourceOrganizations } from "./read-services-section-law.mjs";
 import { writeEnterpriseBrand } from "@coesite-operations/enterprise-branding-services-section/write-enterprise-brand";
 import { sectionCarriesBrand, sectionCustody } from "@coesite-operations/enterprise-branding-services-section/src";
 
 const SERVICES_TREE_PREFIX = "lib/emsenn/services/561-group/services/";
-const ENGINEERING_TREE_PREFIX = `${SERVICES_TREE_PREFIX}engineering-services-section/`;
+const HOUSES = Object.freeze(["science", "engineering", "operations"]);
 const SECTION_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*-(?:services-section|service)$/u;
 
 /**
  * The Group's naming law for a new section, read from its path alone: the directory is the name, it sits
  * in its parent's services/, it is kebab-case ending in -services-section (a section) or -service (a leaf
- * service), and a section founded anywhere under engineering-services-section names its engineering
- * ("computer-engineering-services-section", never "computer-services-section").
+ * service), and a section founded anywhere under one of the three houses (science, engineering, operations)
+ * names its house ("computer-engineering-services-section", never "computer-services-section").
  * @param {string} path The requested repo-relative section path.
  * @param {string} name The requested section name.
  * @returns {string[]} One sentence per rule the request breaks; empty when the name conforms.
@@ -33,10 +33,34 @@ export function sectionNameObstructions(path, name) {
   if (directory !== name) obstructions.push(`the directory "${directory}" is not the section's name "${name}"`);
   if (posix.basename(posix.dirname(trimmed)) !== "services") obstructions.push(`"${directory}" is not founded in its parent's services/ directory`);
   if (!SECTION_NAME.test(directory)) obstructions.push(`"${directory}" is not kebab-case ending in -services-section or -service`);
-  if (trimmed.startsWith(ENGINEERING_TREE_PREFIX) && directory.endsWith("-services-section") && !directory.endsWith("-engineering-services-section")) {
-    obstructions.push(`a section under engineering-services-section is named "<subject>-engineering-services-section", not "${directory}"`);
+  const house = HOUSES.find((candidate) => trimmed.startsWith(`${SERVICES_TREE_PREFIX}${candidate}-services-section/`));
+  if (house && directory.endsWith("-services-section") && !directory.endsWith(`-${house}-services-section`)) {
+    obstructions.push(`a section under ${house}-services-section is named "<subject>-${house}-services-section", not "${directory}"`);
   }
   return obstructions;
+}
+
+/**
+ * The package and repository a section's path derives, never a caller's choice: its custody is read from the path
+ * (sectionCustody), its organization from the Group's one-home rule (sourceOrganizations), and both the package
+ * scope and the repository owner are that organization, the package and repository names the section's directory.
+ * @param {string} path The repo-relative section path.
+ * @param {Record<string, string>} organizations The custody-to-organization binding (readSourceOrganizations).
+ * @returns {{custody: string, organization: string, packageName: string, repository: {type: string, url: string}} | {refused: string, path: string, custody?: string}}
+ */
+export function deriveSectionPackage(path, organizations) {
+  const trimmed = path.replace(/\/+$/u, "");
+  const custody = sectionCustody(trimmed);
+  if (custody === null) return { refused: "PATH_DERIVES_NO_CUSTODY", path: trimmed };
+  const organization = organizations[custody];
+  if (typeof organization !== "string" || organization.length === 0) return { refused: "CUSTODY_HAS_NO_ORGANIZATION", path: trimmed, custody };
+  const name = posix.basename(trimmed);
+  return {
+    custody,
+    organization,
+    packageName: `@${organization}/${name}`,
+    repository: { type: "git", url: `git+https://github.com/${organization}/${name}.git` },
+  };
 }
 
 const operationDefinition = {
@@ -44,7 +68,7 @@ const operationDefinition = {
   description: "Founds one new services-section directory in ServicesSectionForm shape — a README.md and package.json — skipping either that already exists rather than overwriting it, optionally appending one sentence to the parent section's README, then folds the resulting directory entries through fold-directory-entries-into-services-section-form-service.",
   inputSchema: {
     type: "object",
-    required: ["path", "name", "custody", "packageName", "packageDescription"],
+    required: ["path", "name", "packageDescription"],
     properties: {
       path: { type: "string", minLength: 1 },
       name: { type: "string", minLength: 1 },
@@ -72,6 +96,18 @@ const operationDefinition = {
         required: ["refused", "obstructions"],
         additionalProperties: false,
         properties: { refused: { const: "NAME_NOT_CONFORMANT" }, obstructions: { type: "array", items: { type: "string" } } },
+      },
+      {
+        type: "object",
+        required: ["refused", "path"],
+        additionalProperties: false,
+        properties: { refused: { enum: ["PATH_DERIVES_NO_CUSTODY", "CUSTODY_HAS_NO_ORGANIZATION"] }, path: { type: "string" }, custody: { type: "string" } },
+      },
+      {
+        type: "object",
+        required: ["refused", "requested", "derived"],
+        additionalProperties: false,
+        properties: { refused: { enum: ["CUSTODY_NOT_DERIVED", "PACKAGE_NAME_NOT_DERIVED"] }, requested: { type: "string" }, derived: { type: "string" } },
       },
       {
         type: "object",
@@ -115,15 +151,13 @@ function defaultReadmeText(packageName, packageDescription) {
 
 /**
  * Founds one new services-section directory in ServicesSectionForm shape — a README.md and package.json — skipping either that already exists rather than overwriting it, optionally appending one sentence to the parent section's README, then folds the resulting directory entries through fold-directory-entries-into-services-section-form-service.
- * @param {{path: string, name: string, custody: string, packageName: string, packageDescription: string, brand?: string, keywords?: string[], parentReadmeSentence?: string, readme?: string, root?: string}} request A record naming the new section's repo-relative path (must be beneath lib/emsenn/services/561-group/services/), its display name, custody ("science"|"engineering"|"operations"|"561-group"|"public"), its package name and description, an optional brand name (written as an enterprise brand service record through enterprise-branding-services-section's write script — never into the package name, directory name, or README title — and refused when the section is not public custody or one of the five houses), optional extra keywords appended after custody, an optional sentence to append to the parent section's README when not already present, an optional full README text (a one-paragraph README is generated from packageName/packageDescription when omitted), and an optional root (an absolute repository root to resolve path against; when omitted, the repository root is found by walking up from process.cwd() to the nearest ancestor containing lib/emsenn/services/561-group/services, so the result never depends on which directory the caller happens to be in).
- * @returns {Promise<object>} The ServicesSectionForm record folded from the section's entries, plus `created` and `skipped` relative-path arrays, and `brand` (the write-enterprise-brand.mjs result) when request.brand was supplied; or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}` when path is not beneath the services tree, `{refused: "NAME_NOT_CONFORMANT", obstructions}` when the name breaks the Group's naming law (see sectionNameObstructions), before anything is written, `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}` when root is omitted and no ancestor of process.cwd() contains the services tree, or `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}` when request.brand was supplied for a section that is not public custody or one of the five houses.
- * @throws {TypeError} When path, name, custody, packageName, or packageDescription is missing or not a string.
+ * @param {{path: string, name: string, custody?: string, packageName?: string, packageDescription: string, brand?: string, keywords?: string[], parentReadmeSentence?: string, readme?: string, root?: string}} request A record naming the new section's repo-relative path (must be beneath lib/emsenn/services/561-group/services/), its display name, its description, optionally its custody and package name (both derived from the path by deriveSectionPackage; a supplied value that differs is refused, never used), an optional brand name (written as an enterprise brand service record through enterprise-branding-services-section's write script — never into the package name, directory name, or README title — and refused when the section is not public custody or one of the five houses), optional extra keywords appended after custody, an optional sentence to append to the parent section's README when not already present, an optional full README text (a one-paragraph README is generated from packageName/packageDescription when omitted), and an optional root (an absolute repository root to resolve path against; when omitted, the repository root is found by walking up from process.cwd() to the nearest ancestor containing lib/emsenn/services/561-group/services, so the result never depends on which directory the caller happens to be in).
+ * @returns {Promise<object>} The ServicesSectionForm record folded from the section's entries, plus `created` and `skipped` relative-path arrays, and `brand` (the write-enterprise-brand.mjs result) when request.brand was supplied; or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}` when path is not beneath the services tree, `{refused: "NAME_NOT_CONFORMANT", obstructions}` when the name breaks the Group's naming law (see sectionNameObstructions), before anything is written, `{refused: "PATH_DERIVES_NO_CUSTODY"|"CUSTODY_HAS_NO_ORGANIZATION", path}` when the path derives no package, `{refused: "CUSTODY_NOT_DERIVED"|"PACKAGE_NAME_NOT_DERIVED", requested, derived}` when a supplied custody or package name is not the derived one, `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}` when root is omitted and no ancestor of process.cwd() contains the services tree, or `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}` when request.brand was supplied for a section that is not public custody or one of the five houses.
+ * @throws {TypeError} When path, name, or packageDescription is missing or not a string.
  */
 export async function foundServicesSection(request) {
   if (typeof request?.path !== "string" || request.path.length === 0) throw new TypeError("path is required");
   if (typeof request?.name !== "string" || request.name.length === 0) throw new TypeError("name is required");
-  if (typeof request?.custody !== "string" || request.custody.length === 0) throw new TypeError("custody is required");
-  if (typeof request?.packageName !== "string" || request.packageName.length === 0) throw new TypeError("packageName is required");
   if (typeof request?.packageDescription !== "string" || request.packageDescription.length === 0) throw new TypeError("packageDescription is required");
 
   if (!request.path.startsWith(SERVICES_TREE_PREFIX)) {
@@ -141,6 +175,12 @@ export async function foundServicesSection(request) {
     return { refused: "REPOSITORY_ROOT_NOT_FOUND", cwd };
   }
 
+  const derived = deriveSectionPackage(request.path, await readSourceOrganizations(repositoryRoot));
+  if (derived.refused) return derived;
+  if (request.custody !== undefined && request.custody !== derived.custody) return { refused: "CUSTODY_NOT_DERIVED", requested: String(request.custody), derived: derived.custody };
+  if (request.packageName !== undefined && request.packageName !== derived.packageName) return { refused: "PACKAGE_NAME_NOT_DERIVED", requested: String(request.packageName), derived: derived.packageName };
+  const { custody, packageName, repository } = derived;
+
   if (typeof request.brand === "string" && request.brand.length > 0 && !sectionCarriesBrand(request.path)) {
     return { refusal: "SECTION_CARRIES_NO_BRAND", sectionPath: request.path, custody: sectionCustody(request.path) };
   }
@@ -151,20 +191,21 @@ export async function foundServicesSection(request) {
   const skipped = [];
 
   const keywords = [
-    request.custody,
+    custody,
     ...(Array.isArray(request.keywords) ? request.keywords : []),
   ];
 
   const packageJson = {
-    name: request.packageName,
+    name: packageName,
     version: "0.1.0",
     description: request.packageDescription,
+    repository,
     type: "module",
     keywords,
   };
 
   const files = [
-    { rel: "README.md", markdown: true, text: request.readme ?? defaultReadmeText(request.packageName, request.packageDescription) },
+    { rel: "README.md", markdown: true, text: request.readme ?? defaultReadmeText(packageName, request.packageDescription) },
     { rel: "package.json", markdown: false, text: `${JSON.stringify(packageJson, null, 2)}\n` },
   ];
 
@@ -207,7 +248,7 @@ export async function foundServicesSection(request) {
   if (!receiving.conformant) throw new Error(JSON.stringify(receiving.obstructions));
 
   const brand = typeof request.brand === "string" && request.brand.length > 0
-    ? await writeEnterpriseBrand({ sectionPath: request.path, brand: { name: request.brand, custody: request.custody }, root: repositoryRoot })
+    ? await writeEnterpriseBrand({ sectionPath: request.path, brand: { name: request.brand, custody }, root: repositoryRoot })
     : undefined;
 
   return { ...form, created, skipped, ...(brand === undefined ? {} : { brand }) };
