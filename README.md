@@ -80,12 +80,17 @@ section's README, then folds the resulting directory entries through
 `foldDirectoryEntriesIntoServicesSectionForm` (a same-package call, no
 longer a separate dependency).
 
-- request (`{path, name, custody, packageName, packageDescription, brand?,
+- request (`{path, name, packageDescription, custody?, packageName?, brand?,
   keywords?, parentReadmeSentence?, readme?, root?}`): the new section's
   repo-relative path (must be beneath
-  `lib/emsenn/services/561-group/services/`), its display name, custody
-  (`"science"|"engineering"|"operations"|"561-group"|"public"`), its package
-  name and description, an optional brand name (written as an enterprise
+  `lib/emsenn/services/561-group/services/`), its display name and
+  description, optionally its custody and package name (never a caller's
+  choice: `deriveSectionPackage(path, organizations)` reads the custody from
+  the path and the organization from the `sourceOrganizations` of rule
+  `every-repository-package-and-section-has-one-home`, and names the package
+  `@<organization>/<directory>` and its repository
+  `github.com/<organization>/<directory>`; a supplied value that differs is
+  refused), an optional brand name (written as an enterprise
   brand service record — never into the package name, directory name, or
   README title — and refused when the section is not public custody or one
   of the five houses), optional extra keywords, an optional sentence to
@@ -95,17 +100,20 @@ longer a separate dependency).
   `created` and `skipped` relative-path arrays, and `brand` when supplied;
   or a refusal datum: `{refused: "PATH_OUTSIDE_SERVICES_TREE"}`,
   `{refused: "NAME_NOT_CONFORMANT", obstructions}`,
+  `{refused: "PATH_DERIVES_NO_CUSTODY"|"CUSTODY_HAS_NO_ORGANIZATION", path}`,
+  `{refused: "CUSTODY_NOT_DERIVED"|"PACKAGE_NAME_NOT_DERIVED", requested, derived}`,
   `{refused: "REPOSITORY_ROOT_NOT_FOUND", cwd}`, or
   `{refusal: "SECTION_CARRIES_NO_BRAND", sectionPath, custody}`.
 - Naming law (`sectionNameObstructions(path, name)`), checked before anything
   is written: the directory is the name; it sits in its parent's `services/`;
   it is kebab-case ending in `-services-section` (a section) or `-service` (a
-  leaf service); and a section anywhere under `engineering-services-section/`
-  names its engineering — `computer-engineering-services-section`, never
+  leaf service); and a section anywhere under one of the three houses
+  (`science-`, `engineering-`, `operations-services-section/`) names its house
+  — `computer-engineering-services-section`, never
   `computer-services-section`. A new area is founded through this verb, not
   with `mkdir`.
-- Throws `TypeError` when path, name, custody, packageName, or
-  packageDescription is missing or not a string.
+- Throws `TypeError` when path, name, or packageDescription is missing or
+  not a string.
 
 Command: `found-services-section` reads one JSON value per input line and
 writes one JSON value per output line.
